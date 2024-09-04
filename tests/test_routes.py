@@ -138,3 +138,14 @@ class TestAccountService(TestCase):
         """It should not Read an Account that is not found"""
         resp = self.client.get(f"{BASE_URL}/0")
         self.assertEqual(resp.status_code, status.HTTP_404_NOT_FOUND)
+
+    def list_accounts(self):
+        """
+        List all Accounts
+        This endpoint will list all Accounts
+        """
+        app.logger.info("Request to list Accounts")
+        accounts = Account.all()
+        account_list = [account.serialize() for account in accounts]
+        app.logger.info("Returning [%s] accounts", len(account_list))
+        return jsonify(account_list), status.HTTP_200_OK
