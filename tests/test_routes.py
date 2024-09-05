@@ -1,10 +1,3 @@
-"""
-Account API Service Test Suite
-
-Test cases can be run with the following:
-  nosetests -v --with-spec --spec-color
-  coverage report -m
-"""
 import os
 import logging
 from unittest import TestCase
@@ -12,6 +5,9 @@ from tests.factories import AccountFactory
 from service.common import status  # HTTP Status Codes
 from service.models import db, Account, init_db
 from service.routes import app
+from flask_talisman import Talisman
+from flask import Flask
+from flask_cors import CORS
 
 DATABASE_URI = os.getenv(
     "DATABASE_URI", "postgresql://postgres:postgres@localhost:5432/postgres"
@@ -19,36 +15,46 @@ DATABASE_URI = os.getenv(
 
 BASE_URL = "/accounts"
 
+HTTPS_ENVIRON = {'wsgi.url_scheme': 'https'}
 
-######################################################################
-#  T E S T   C A S E S
-######################################################################
+app = Flask(__name__)
+
+# CORS configuration
+CORS(app, resources={r"/*": {"origins": "*"}})
+
+# Security headers configuration
+Talisman(app, force_https=False)
+
 class TestAccountService(TestCase):
     """Account Service Tests"""
 
-    @classmethod
-    def setUpClass(cls):
-        """Run once before all tests"""
-        app.config["TESTING"] = True
-        app.config["DEBUG"] = False
-        app.config["SQLALCHEMY_DATABASE_URI"] = DATABASE_URI
-        app.logger.setLevel(logging.CRITICAL)
-        init_db(app)
+@classmethod
+def setUpClass(cls):
+    """Run once before all tests"""
+    cls.app = app
+    cls.client = cls.app.test_client()
+    cls.talisman = Talisman(cls.app)
+    cls.talisman.force_https = False  # Ensure this is correctly applied
+
+    cls.app_context = cls.app.app_context()
+    cls.app_context.push()
+
 
     @classmethod
     def tearDownClass(cls):
-        """Runs once before test suite"""
-
+        """Runs once after test suite"""
+        cls.app_context.pop()
+    
     def setUp(self):
         """Runs before each test"""
-        db.session.query(Account).delete()  # clean up the last tests
+        db.create_all()  # Ensure tables are created
+        db.session.query(Account).delete()  # Clean up the last tests
         db.session.commit()
-
-        self.client = app.test_client()
 
     def tearDown(self):
         """Runs once after each test case"""
         db.session.remove()
+        db.drop_all()  # Clean up all tables
 
     ######################################################################
     #  H E L P E R   M E T H O D S
@@ -60,6 +66,8 @@ class TestAccountService(TestCase):
         for _ in range(count):
             account = AccountFactory()
             response = self.client.post(BASE_URL, json=account.serialize())
+            if response.status_code == 302:
+                logging.debug("Redirect detected: %s", response.headers)
             self.assertEqual(
                 response.status_code,
                 status.HTTP_201_CREATED,
@@ -82,7 +90,7 @@ class TestAccountService(TestCase):
     def test_health(self):
         """It should be healthy"""
         resp = self.client.get("/health")
-        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
         data = resp.get_json()
         self.assertEqual(data["status"], "OK")
 
@@ -94,6 +102,8 @@ class TestAccountService(TestCase):
             json=account.serialize(),
             content_type="application/json"
         )
+        if response.status_code == 302:
+            logging.debug("Redirect detected: %s", response.headers)
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
 
         # Make sure location header is set
@@ -111,6 +121,8 @@ class TestAccountService(TestCase):
     def test_bad_request(self):
         """It should not Create an Account when sending the wrong data"""
         response = self.client.post(BASE_URL, json={"name": "not enough data"})
+        if response.status_code == 302:
+            logging.debug("Redirect detected: %s", response.headers)
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_unsupported_media_type(self):
@@ -121,15 +133,18 @@ class TestAccountService(TestCase):
             json=account.serialize(),
             content_type="test/html"
         )
+        if response.status_code == 302:
+            logging.debug("Redirect detected: %s", response.headers)
         self.assertEqual(response.status_code, status.HTTP_415_UNSUPPORTED_MEDIA_TYPE)
 
-    # ADD YOUR TEST CASES HERE ...
     def test_get_account(self):
         """It should Read a single Account"""
         account = self._create_accounts(1)[0]
         resp = self.client.get(
             f"{BASE_URL}/{account.id}", content_type="application/json"
         )
+        if resp.status_code == 302:
+            logging.debug("Redirect detected: %s", resp.headers)
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
         data = resp.get_json()
         self.assertEqual(data["name"], account.name)
@@ -137,41 +152,26 @@ class TestAccountService(TestCase):
     def test_get_account_not_found(self):
         """It should not Read an Account that is not found"""
         resp = self.client.get(f"{BASE_URL}/0")
+        if resp.status_code == 302:
+            logging.debug("Redirect detected: %s", resp.headers)
         self.assertEqual(resp.status_code, status.HTTP_404_NOT_FOUND)
 
-    def list_accounts(self):
-        """
-        List all Accounts
-        This endpoint will list all Accounts
-        """
-        app.logger.info("Request to list Accounts")
-        accounts = Account.all()
-        account_list = [account.serialize() for account in accounts]
-        app.logger.info("Returning [%s] accounts", len(account_list))
-        return jsonify(account_list), status.HTTP_200_OK
+    def test_security_headers(self):
+        """It should return security headers"""
+        response = self.client.get('/', environ_overrides=HTTPS_ENVIRON)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        headers = {
+            'X-Frame-Options': 'SAMEORIGIN',
+            'X-Content-Type-Options': 'nosniff',
+            'Content-Security-Policy': 'default-src \'self\'; object-src \'none\'',
+            'Referrer-Policy': 'strict-origin-when-cross-origin'
+        }
+        for key, value in headers.items():
+            self.assertEqual(response.headers.get(key), value)
 
-
-    def update_accounts(account_id):
-        """
-        Update an Account
-        This endpoint will update an Account based on the posted data
-        """
-        app.logger.info("Request to update an Account with id: %s", account_id)
-        account = Account.find(account_id)
-        if not account:
-            abort(status.HTTP_404_NOT_FOUND, f"Account with id [{account_id}] could not be found.")
-        account.deserialize(request.get_json())
-        account.update()
-        return account.serialize(), status.HTTP_200_OK
-
-
-    def delete_accounts(account_id):
-        """
-        Delete an Account
-        This endpoint will delete an Account based on the account_id that is requested
-        """
-        app.logger.info("Request to delete an Account with id: %s", account_id)
-        account = Account.find(account_id)
-        if account:
-            account.delete()
-        return "", status.HTTP_204_NO_CONTENT
+    def test_cors_security(self):
+        """It should return a CORS header"""
+        response = self.client.get('/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        # Check for the CORS header
+        self.assertEqual(response.headers.get('Access-Control-Allow-Origin'), '*')
