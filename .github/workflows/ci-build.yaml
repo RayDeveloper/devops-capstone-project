@@ -1,8 +1,6 @@
 name: CI Build
 
-# Controls when the workflow will run
 on:
-  # Triggers the workflow on push or pull request events for the main branch
   push:
     branches:
       - main
@@ -10,32 +8,33 @@ on:
     branches:
       - main
 
-# Define the jobs that will run in the workflow
 jobs:
   build:
-    # The type of machine the job will run on
     runs-on: ubuntu-latest
+    
+    # Run the job in a Python 3.9 slim container
+    container:
+      image: python:3.9-slim
 
-    # Steps define a sequence of commands to execute
     steps:
       # Check out the repository under $GITHUB_WORKSPACE
       - name: Checkout code
         uses: actions/checkout@v3
 
-      # Set up Node.js (example of environment setup, change as needed)
-      - name: Set up Node.js
-        uses: actions/setup-node@v3
-        with:
-          node-version: '16'
-
-      # Install dependencies
+      # Install dependencies (if you use a requirements.txt or pyproject.toml)
       - name: Install dependencies
-        run: npm install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
-      # Run your build script (customize this step based on your build system)
+      # Run the build (customize this command based on your project)
       - name: Run build
-        run: npm run build
+        run: |
+          # Add your build steps here
+          echo "Running build step"
 
-      # Run tests
+      # Run tests (customize this command based on your testing framework)
       - name: Run tests
-        run: npm test
+        run: |
+          # Example for running pytest or another test framework
+          pytest
