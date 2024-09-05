@@ -6,6 +6,8 @@ from service.common import status  # HTTP Status Codes
 from service.models import db, Account, init_db
 from service.routes import app
 from flask_talisman import Talisman
+from flask import Flask
+from flask_cors import CORS
 
 DATABASE_URI = os.getenv(
     "DATABASE_URI", "postgresql://postgres:postgres@localhost:5432/postgres"
@@ -14,6 +16,14 @@ DATABASE_URI = os.getenv(
 BASE_URL = "/accounts"
 
 HTTPS_ENVIRON = {'wsgi.url_scheme': 'https'}
+
+app = Flask(__name__)
+
+# CORS configuration
+CORS(app, resources={r"/*": {"origins": "*"}})
+
+# Security headers configuration
+Talisman(app, force_https=False)
 
 class TestAccountService(TestCase):
     """Account Service Tests"""
@@ -161,7 +171,7 @@ def setUpClass(cls):
 
     def test_cors_security(self):
         """It should return a CORS header"""
-        response = self.client.get('/', environ_overrides=HTTPS_ENVIRON)
+        response = self.client.get('/')
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         # Check for the CORS header
         self.assertEqual(response.headers.get('Access-Control-Allow-Origin'), '*')
